@@ -240,10 +240,16 @@ End Sub
 
 Function WordDiffOps(a() As String, b() As String) As Variant
     Dim la As Long, lb As Long
+    Dim results As Collection
+    Dim prefixLen As Long, suffixLen As Long
+    Dim kk As Long
+    Dim midALen As Long, midBLen As Long
+    Dim midA() As String, midB() As String
+    Dim midOps As Collection
+    Dim item As Variant
+
     la = UBound(a) - LBound(a) + 1
     lb = UBound(b) - LBound(b) + 1
-
-    Dim results As Collection
     Set results = New Collection
 
     If la = 0 And lb = 0 Then
@@ -251,7 +257,6 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         Exit Function
     End If
 
-    Dim prefixLen As Long
     prefixLen = 0
     Do While prefixLen < la And prefixLen < lb
         If a(LBound(a) + prefixLen) = b(LBound(b) + prefixLen) Then
@@ -261,7 +266,6 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         End If
     Loop
 
-    Dim suffixLen As Long
     suffixLen = 0
     Do While suffixLen < (la - prefixLen) And suffixLen < (lb - prefixLen)
         If a(UBound(a) - suffixLen) = b(UBound(b) - suffixLen) Then
@@ -271,17 +275,14 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         End If
     Loop
 
-    Dim kk As Long
     For kk = 0 To prefixLen - 1
         results.Add Array("eq", a(LBound(a) + kk))
     Next kk
 
-    Dim midALen As Long, midBLen As Long
     midALen = la - prefixLen - suffixLen
     midBLen = lb - prefixLen - suffixLen
 
     If midALen > 0 Or midBLen > 0 Then
-        Dim midA() As String, midB() As String
         If midALen > 0 Then
             ReDim midA(0 To midALen - 1)
             For kk = 0 To midALen - 1
@@ -290,6 +291,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         Else
             ReDim midA(0 To -1)
         End If
+
         If midBLen > 0 Then
             ReDim midB(0 To midBLen - 1)
             For kk = 0 To midBLen - 1
@@ -299,9 +301,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
             ReDim midB(0 To -1)
         End If
 
-        Dim midOps As Collection
         Set midOps = LCSDiff(midA, midB)
-        Dim item As Variant
         For Each item In midOps
             results.Add item
         Next item
