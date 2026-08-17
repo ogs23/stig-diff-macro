@@ -172,24 +172,24 @@ Sub WriteWordDiff(targetCell As Range, oldText As String, newText As String)
     oldWords = Split(Trim(oldText), " ")
     newWords = Split(Trim(newText), " ")
 
-    Dim ops() As Variant
-    ops = WordDiffOps(oldWords, newWords)
+    Dim ops As Collection
+    Set ops = WordDiffOps(oldWords, newWords)
 
     Dim fullText As String
     fullText = ""
-    Dim n As Long
-    For n = LBound(ops) To UBound(ops)
-        fullText = fullText & ops(n)(1) & " "
-    Next n
+    Dim opItem As Variant
+    For Each opItem In ops
+        fullText = fullText & opItem(1) & " "
+    Next opItem
 
     targetCell.Value = fullText
 
     Dim pos As Long
     pos = 1
-    For n = LBound(ops) To UBound(ops)
+    For Each opItem In ops
         Dim tag As String, word As String
-        tag = ops(n)(0)
-        word = ops(n)(1)
+        tag = opItem(0)
+        word = opItem(1)
         Dim wlen As Long
         wlen = Len(word)
         If wlen > 0 Then
@@ -208,10 +208,10 @@ Sub WriteWordDiff(targetCell As Range, oldText As String, newText As String)
             End With
         End If
         pos = pos + wlen + 1
-    Next n
+    Next opItem
 End Sub
 
-Function WordDiffOps(a() As String, b() As String) As Variant
+Function WordDiffOps(a() As String, b() As String) As Collection
     Dim la As Long, lb As Long
     la = UBound(a) - LBound(a) + 1
     lb = UBound(b) - LBound(b) + 1
@@ -220,7 +220,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
     Set results = New Collection
 
     If la = 0 And lb = 0 Then
-        WordDiffOps = CollectionToArray(results)
+        Set WordDiffOps = results
         Exit Function
     End If
 
@@ -253,61 +253,34 @@ Function WordDiffOps(a() As String, b() As String) As Variant
     midALen = la - prefixLen - suffixLen
     midBLen = lb - prefixLen - suffixLen
 
-    If midALen > 0 Or midBLen > 0 Then
-        Dim midA() As String, midB() As String
-        If midALen > 0 Then
-            ReDim midA(0 To midALen - 1)
-            For kk = 0 To midALen - 1
-                midA(kk) = a(LBound(a) + prefixLen + kk)
-            Next kk
-        Else
-            ReDim midA(0 To -1)
-        End If
-        If midBLen > 0 Then
-            ReDim midB(0 To midBLen - 1)
-            For kk = 0 To midBLen - 1
-                midB(kk) = b(LBound(b) + prefixLen + kk)
-            Next kk
-        Else
-            ReDim midB(0 To -1)
-        End If
+    Dim midA As Collection, midB As Collection
+    Set midA = New Collection
+    Set midB = New Collection
+    For kk = 0 To midALen - 1
+        midA.Add a(LBound(a) + prefixLen + kk)
+    Next kk
+    For kk = 0 To midBLen - 1
+        midB.Add b(LBound(b) + prefixLen + kk)
+    Next kk
 
-        Dim midOps As Collection
-        Set midOps = LCSDiff(midA, midB)
-        Dim item As Variant
-        For Each item In midOps
-            results.Add item
-        Next item
-    End If
+    Dim midOps As Collection
+    Set midOps = LCSDiff(midA, midB)
+    Dim item As Variant
+    For Each item In midOps
+        results.Add item
+    Next item
 
     For kk = 0 To suffixLen - 1
         results.Add Array("eq", a(UBound(a) - suffixLen + 1 + kk))
     Next kk
 
-    WordDiffOps = CollectionToArray(results)
+    Set WordDiffOps = results
 End Function
 
-Function CollectionToArray(col As Collection) As Variant
-    Dim arr() As Variant
-    If col.Count = 0 Then
-        ReDim arr(0 To -1)
-        CollectionToArray = arr
-        Exit Function
-    End If
-    ReDim arr(0 To col.Count - 1)
-    Dim i As Long
-    For i = 1 To col.Count
-        arr(i - 1) = col(i)
-    Next i
-    CollectionToArray = arr
-End Function
-
-Function LCSDiff(a() As String, b() As String) As Collection
+Function LCSDiff(a As Collection, b As Collection) As Collection
     Dim la As Long, lb As Long
-    la = UBound(a) - LBound(a) + 1
-    lb = UBound(b) - LBound(b) + 1
-    If la < 0 Then la = 0
-    If lb < 0 Then lb = 0
+    la = a.Count
+    lb = b.Count
 
     Dim result As Collection
     Set result = New Collection
@@ -318,16 +291,16 @@ Function LCSDiff(a() As String, b() As String) As Collection
     End If
     If la = 0 Then
         Dim j As Long
-        For j = 0 To lb - 1
-            result.Add Array("ins", b(LBound(b) + j))
+        For j = 1 To lb
+            result.Add Array("ins", b(j))
         Next j
         Set LCSDiff = result
         Exit Function
     End If
     If lb = 0 Then
         Dim i2 As Long
-        For i2 = 0 To la - 1
-            result.Add Array("del", a(LBound(a) + i2))
+        For i2 = 1 To la
+            result.Add Array("del", a(i2))
         Next i2
         Set LCSDiff = result
         Exit Function
@@ -338,7 +311,7 @@ Function LCSDiff(a() As String, b() As String) As Collection
     Dim x As Long, y As Long
     For x = 1 To la
         For y = 1 To lb
-            If a(LBound(a) + x - 1) = b(LBound(b) + y - 1) Then
+            If a(x) = b(y) Then
                 dp(x, y) = dp(x - 1, y - 1) + 1
             Else
                 If dp(x - 1, y) >= dp(x, y - 1) Then
@@ -354,23 +327,23 @@ Function LCSDiff(a() As String, b() As String) As Collection
     Set revOps = New Collection
     x = la: y = lb
     Do While x > 0 And y > 0
-        If a(LBound(a) + x - 1) = b(LBound(b) + y - 1) Then
-            revOps.Add Array("eq", a(LBound(a) + x - 1))
+        If a(x) = b(y) Then
+            revOps.Add Array("eq", a(x))
             x = x - 1: y = y - 1
         ElseIf dp(x - 1, y) >= dp(x, y - 1) Then
-            revOps.Add Array("del", a(LBound(a) + x - 1))
+            revOps.Add Array("del", a(x))
             x = x - 1
         Else
-            revOps.Add Array("ins", b(LBound(b) + y - 1))
+            revOps.Add Array("ins", b(y))
             y = y - 1
         End If
     Loop
     Do While x > 0
-        revOps.Add Array("del", a(LBound(a) + x - 1))
+        revOps.Add Array("del", a(x))
         x = x - 1
     Loop
     Do While y > 0
-        revOps.Add Array("ins", b(LBound(b) + y - 1))
+        revOps.Add Array("ins", b(y))
         y = y - 1
     Loop
 
