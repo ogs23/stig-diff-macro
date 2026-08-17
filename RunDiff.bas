@@ -248,8 +248,8 @@ Function WordDiffOps(a() As String, b() As String) As Variant
     Dim midOps As Collection
     Dim item As Variant
 
-    la = UBound(a) - LBound(a) + 1
-    lb = UBound(b) - LBound(b) + 1
+    la = UBound(a) + 1
+    lb = UBound(b) + 1
     Set results = New Collection
 
     If la = 0 And lb = 0 Then
@@ -259,7 +259,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
 
     prefixLen = 0
     Do While prefixLen < la And prefixLen < lb
-        If a(LBound(a) + prefixLen) = b(LBound(b) + prefixLen) Then
+        If a(prefixLen) = b(prefixLen) Then
             prefixLen = prefixLen + 1
         Else
             Exit Do
@@ -268,7 +268,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
 
     suffixLen = 0
     Do While suffixLen < (la - prefixLen) And suffixLen < (lb - prefixLen)
-        If a(UBound(a) - suffixLen) = b(UBound(b) - suffixLen) Then
+        If a(la - 1 - suffixLen) = b(lb - 1 - suffixLen) Then
             suffixLen = suffixLen + 1
         Else
             Exit Do
@@ -276,7 +276,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
     Loop
 
     For kk = 0 To prefixLen - 1
-        results.Add Array("eq", a(LBound(a) + kk))
+        results.Add Array("eq", a(kk))
     Next kk
 
     midALen = la - prefixLen - suffixLen
@@ -286,7 +286,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         If midALen > 0 Then
             ReDim midA(0 To midALen - 1)
             For kk = 0 To midALen - 1
-                midA(kk) = a(LBound(a) + prefixLen + kk)
+                midA(kk) = a(prefixLen + kk)
             Next kk
         Else
             ReDim midA(0 To -1)
@@ -295,7 +295,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
         If midBLen > 0 Then
             ReDim midB(0 To midBLen - 1)
             For kk = 0 To midBLen - 1
-                midB(kk) = b(LBound(b) + prefixLen + kk)
+                midB(kk) = b(prefixLen + kk)
             Next kk
         Else
             ReDim midB(0 To -1)
@@ -308,7 +308,7 @@ Function WordDiffOps(a() As String, b() As String) As Variant
     End If
 
     For kk = 0 To suffixLen - 1
-        results.Add Array("eq", a(UBound(a) - suffixLen + 1 + kk))
+        results.Add Array("eq", a(la - suffixLen + kk))
     Next kk
 
     WordDiffOps = CollectionToArray(results)
@@ -332,12 +332,18 @@ End Function
 
 Function LCSDiff(a() As String, b() As String) As Collection
     Dim la As Long, lb As Long
-    la = UBound(a) - LBound(a) + 1
-    lb = UBound(b) - LBound(b) + 1
+    Dim result As Collection
+    Dim dp() As Long
+    Dim x As Long, y As Long
+    Dim revOps As Collection
+    Dim n As Long
+    Dim j As Long, i2 As Long
+
+    la = UBound(a) + 1
+    lb = UBound(b) + 1
     If la < 0 Then la = 0
     If lb < 0 Then lb = 0
 
-    Dim result As Collection
     Set result = New Collection
 
     If la = 0 And lb = 0 Then
@@ -345,64 +351,58 @@ Function LCSDiff(a() As String, b() As String) As Collection
         Exit Function
     End If
     If la = 0 Then
-        Dim j As Long
         For j = 0 To lb - 1
-            result.Add Array("ins", b(LBound(b) + j))
+            result.Add Array("ins", b(j))
         Next j
         Set LCSDiff = result
         Exit Function
     End If
     If lb = 0 Then
-        Dim i2 As Long
         For i2 = 0 To la - 1
-            result.Add Array("del", a(LBound(a) + i2))
+            result.Add Array("del", a(i2))
         Next i2
         Set LCSDiff = result
         Exit Function
     End If
 
-    Dim dp() As Long
     ReDim dp(0 To la, 0 To lb)
-    Dim x As Long, y As Long
     For x = 1 To la
         For y = 1 To lb
-            If a(LBound(a) + x - 1) = b(LBound(b) + y - 1) Then
+            If a(x - 1) = b(y - 1) Then
                 dp(x, y) = dp(x - 1, y - 1) + 1
+            ElseIf dp(x - 1, y) >= dp(x, y - 1) Then
+                dp(x, y) = dp(x - 1, y)
             Else
-                If dp(x - 1, y) >= dp(x, y - 1) Then
-                    dp(x, y) = dp(x - 1, y)
-                Else
-                    dp(x, y) = dp(x, y - 1)
-                End If
+                dp(x, y) = dp(x, y - 1)
             End If
         Next y
     Next x
 
-    Dim revOps As Collection
     Set revOps = New Collection
-    x = la: y = lb
+    x = la
+    y = lb
     Do While x > 0 And y > 0
-        If a(LBound(a) + x - 1) = b(LBound(b) + y - 1) Then
-            revOps.Add Array("eq", a(LBound(a) + x - 1))
-            x = x - 1: y = y - 1
+        If a(x - 1) = b(y - 1) Then
+            revOps.Add Array("eq", a(x - 1))
+            x = x - 1
+            y = y - 1
         ElseIf dp(x - 1, y) >= dp(x, y - 1) Then
-            revOps.Add Array("del", a(LBound(a) + x - 1))
+            revOps.Add Array("del", a(x - 1))
             x = x - 1
         Else
-            revOps.Add Array("ins", b(LBound(b) + y - 1))
+            revOps.Add Array("ins", b(y - 1))
             y = y - 1
         End If
     Loop
     Do While x > 0
-        revOps.Add Array("del", a(LBound(a) + x - 1))
+        revOps.Add Array("del", a(x - 1))
         x = x - 1
     Loop
     Do While y > 0
-        revOps.Add Array("ins", b(LBound(b) + y - 1))
+        revOps.Add Array("ins", b(y - 1))
         y = y - 1
     Loop
 
-    Dim n As Long
     For n = revOps.Count To 1 Step -1
         result.Add revOps(n)
     Next n
