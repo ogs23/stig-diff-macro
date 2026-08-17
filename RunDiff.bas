@@ -8,7 +8,6 @@ Sub RunDiff()
     Set wsB = Sheets("Rev8")
     Set wsD = Sheets("Diff")
 
-    ' Clear old results
     Dim lastClearRow As Long
     lastClearRow = wsD.Cells(wsD.Rows.Count, 1).End(xlUp).Row
     If lastClearRow < 2 Then lastClearRow = 2
@@ -20,7 +19,8 @@ Sub RunDiff()
     Dim keyCol As String
     keyCol = "Group ID"
 
-    Dim colA(0 To 30) As Integer, colB(0 To 30) As Integer
+    Dim colA(0 To 30) As Integer
+    Dim colB(0 To 30) As Integer
     Dim i As Integer
     For i = LBound(headers) To UBound(headers)
         colA(i) = FindCol(wsA, headers(i))
@@ -33,34 +33,37 @@ Sub RunDiff()
         If headers(i) = keyCol Then keyIdx = i
     Next i
     If keyIdx = -1 Then
-        MsgBox "'Group ID' not found in the header list inside the macro.", vbCritical
+        MsgBox "Group ID not found in header list.", vbCritical
         GoTo CleanExit
     End If
 
-    Dim keyColA As Integer, keyColB As Integer
+    Dim keyColA As Integer
+    Dim keyColB As Integer
     keyColA = colA(keyIdx)
     keyColB = colB(keyIdx)
     If keyColA = 0 Or keyColB = 0 Then
-        MsgBox "Could not find a 'Group ID' column header on the Rev5 or Rev8 tab. Check spelling/spacing in row 1.", vbCritical
+        MsgBox "Could not find Group ID column on Rev5 or Rev8.", vbCritical
         GoTo CleanExit
     End If
 
-    Dim lastA As Long, lastB As Long
+    Dim lastA As Long
+    Dim lastB As Long
     lastA = wsA.Cells(wsA.Rows.Count, keyColA).End(xlUp).Row
     lastB = wsB.Cells(wsB.Rows.Count, keyColB).End(xlUp).Row
     If lastA < 2 Then
-        MsgBox "No data found on Rev5 (nothing below row 1).", vbCritical
+        MsgBox "No data on Rev5.", vbCritical
         GoTo CleanExit
     End If
     If lastB < 2 Then
-        MsgBox "No data found on Rev8 (nothing below row 1).", vbCritical
+        MsgBox "No data on Rev8.", vbCritical
         GoTo CleanExit
     End If
 
-    ' Row-lookup collections, keyed by Group ID text (cross-platform, no Scripting.Dictionary)
-    Dim rowsA As New Collection, rowsB As New Collection
+    Dim rowsA As New Collection
+    Dim rowsB As New Collection
     Dim allKeys As New Collection
-    Dim r As Long, kTxt As String
+    Dim r As Long
+    Dim kTxt As String
 
     For r = 2 To lastA
         kTxt = Trim(CStr(wsA.Cells(r, keyColA).Value))
@@ -85,11 +88,15 @@ Sub RunDiff()
 
     Dim key As Variant
     For Each key In allKeys
-        Dim inA As Boolean, inB As Boolean
+        Dim inA As Boolean
+        Dim inB As Boolean
         inA = KeyExists(rowsA, CStr(key))
         inB = KeyExists(rowsB, CStr(key))
 
-        Dim rowA As Long, rowB As Long
+        Dim rowA As Long
+        Dim rowB As Long
+        rowA = 0
+        rowB = 0
         If inA Then rowA = rowsA(CStr(key))
         If inB Then rowB = rowsB(CStr(key))
 
@@ -111,8 +118,10 @@ Sub RunDiff()
         colOut = 3
         For i = LBound(headers) To UBound(headers)
             If headers(i) <> keyCol Then
-                Dim valA As String, valB As String
-                valA = "": valB = ""
+                Dim valA As String
+                Dim valB As String
+                valA = ""
+                valB = ""
                 If inA And colA(i) > 0 Then valA = SafeStr(wsA.Cells(rowA, colA(i)).Value)
                 If inB And colB(i) > 0 Then valB = SafeStr(wsB.Cells(rowB, colB(i)).Value)
 
@@ -136,11 +145,14 @@ Sub RunDiff()
         wsD.Cells(outRow, 1).Value = status
 
         Dim fillColor As Long
+        fillColor = -1
         Select Case status
-            Case "Added": fillColor = RGB(198, 239, 206)
-            Case "Removed": fillColor = RGB(255, 199, 206)
-            Case "Modified": fillColor = RGB(255, 235, 156)
-            Case Else: fillColor = -1
+            Case "Added"
+                fillColor = RGB(198, 239, 206)
+            Case "Removed"
+                fillColor = RGB(255, 199, 206)
+            Case "Modified"
+                fillColor = RGB(255, 235, 156)
         End Select
         If fillColor <> -1 Then
             wsD.Range(wsD.Cells(outRow, 1), wsD.Cells(outRow, colOut - 1)).Interior.Color = fillColor
@@ -158,7 +170,7 @@ CleanExit:
 ErrHandler:
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
-    MsgBox "Error: " & Err.Description & " (line context: row " & outRow & ")", vbCritical
+    MsgBox "Error: " & Err.Description & " (around output row " & outRow & ")", vbCritical
 End Sub
 
 Function KeyExists(col As Collection, key As String) As Boolean
@@ -182,7 +194,8 @@ Function SafeStr(v As Variant) As String
 End Function
 
 Function FindCol(ws As Worksheet, headerName As String) As Integer
-    Dim c As Integer, lastCol As Integer
+    Dim c As Integer
+    Dim lastCol As Integer
     lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
     For c = 1 To lastCol
         If Trim(CStr(ws.Cells(1, c).Value)) = headerName Then
@@ -194,29 +207,31 @@ Function FindCol(ws As Worksheet, headerName As String) As Integer
 End Function
 
 Sub WriteWordDiff(targetCell As Range, oldText As String, newText As String)
-    Dim oldWords() As String, newWords() As String
+    Dim oldWords() As String
+    Dim newWords() As String
     oldWords = Split(Trim(oldText), " ")
     newWords = Split(Trim(newText), " ")
 
-    Dim ops() As Variant
-    ops = WordDiffOps(oldWords, newWords)
+    Dim ops As Collection
+    Set ops = LCSDiff(oldWords, newWords)
 
     Dim fullText As String
     fullText = ""
-    Dim n As Long
-    For n = LBound(ops) To UBound(ops)
-        fullText = fullText & ops(n)(1) & " "
-    Next n
+    Dim item As Variant
+    For Each item In ops
+        fullText = fullText & item(1) & " "
+    Next item
     If Len(fullText) = 0 Then fullText = " "
 
     targetCell.Value = fullText
 
     Dim pos As Long
     pos = 1
-    For n = LBound(ops) To UBound(ops)
-        Dim tag As String, word As String
-        tag = ops(n)(0)
-        word = ops(n)(1)
+    For Each item In ops
+        Dim tag As String
+        Dim word As String
+        tag = item(0)
+        word = item(1)
         Dim wlen As Long
         wlen = Len(word)
         If wlen > 0 Then
@@ -235,122 +250,25 @@ Sub WriteWordDiff(targetCell As Range, oldText As String, newText As String)
             End With
         End If
         pos = pos + wlen + 1
-    Next n
+    Next item
 End Sub
 
-Function WordDiffOps(a() As String, b() As String) As Variant
-    Dim la As Long, lb As Long
-    Dim results As Collection
-    Dim prefixLen As Long, suffixLen As Long
-    Dim kk As Long
-    Dim midALen As Long, midBLen As Long
-    Dim midA() As String, midB() As String
-    Dim midOps As Collection
-    Dim item As Variant
-
-    la = UBound(a) + 1
-    lb = UBound(b) + 1
-    Set results = New Collection
-
-    If la = 0 And lb = 0 Then
-        WordDiffOps = CollectionToArray(results)
-        Exit Function
-    End If
-
-    prefixLen = 0
-    Do While prefixLen < la And prefixLen < lb
-        If a(prefixLen) = b(prefixLen) Then
-            prefixLen = prefixLen + 1
-        Else
-            Exit Do
-        End If
-    Loop
-
-    suffixLen = 0
-    Do While suffixLen < (la - prefixLen) And suffixLen < (lb - prefixLen)
-        If a(la - 1 - suffixLen) = b(lb - 1 - suffixLen) Then
-            suffixLen = suffixLen + 1
-        Else
-            Exit Do
-        End If
-    Loop
-
-    For kk = 0 To prefixLen - 1
-        results.Add Array("eq", a(kk))
-    Next kk
-
-    midALen = la - prefixLen - suffixLen
-    midBLen = lb - prefixLen - suffixLen
-
-    If midALen > 0 Or midBLen > 0 Then
-        If midALen > 0 Then
-            ReDim midA(0 To midALen - 1)
-            For kk = 0 To midALen - 1
-                midA(kk) = a(prefixLen + kk)
-            Next kk
-        Else
-            ReDim midA(0 To -1)
-        End If
-
-        If midBLen > 0 Then
-            ReDim midB(0 To midBLen - 1)
-            For kk = 0 To midBLen - 1
-                midB(kk) = b(prefixLen + kk)
-            Next kk
-        Else
-            ReDim midB(0 To -1)
-        End If
-
-        Set midOps = LCSDiff(midA, midB)
-        For Each item In midOps
-            results.Add item
-        Next item
-    End If
-
-    For kk = 0 To suffixLen - 1
-        results.Add Array("eq", a(la - suffixLen + kk))
-    Next kk
-
-    WordDiffOps = CollectionToArray(results)
-End Function
-
-Function CollectionToArray(col As Collection) As Variant
-    Dim arr() As Variant
-    If col.Count = 0 Then
-        ReDim arr(0 To 0)
-        arr(0) = Array("eq", "")
-        CollectionToArray = arr
-        Exit Function
-    End If
-    ReDim arr(0 To col.Count - 1)
-    Dim i As Long
-    For i = 1 To col.Count
-        arr(i - 1) = col(i)
-    Next i
-    CollectionToArray = arr
-End Function
-
 Function LCSDiff(a() As String, b() As String) As Collection
-    Dim la As Long, lb As Long
-    Dim result As Collection
-    Dim dp() As Long
-    Dim x As Long, y As Long
-    Dim revOps As Collection
-    Dim n As Long
-    Dim j As Long, i2 As Long
-
+    Dim la As Long
+    Dim lb As Long
     la = UBound(a) + 1
     lb = UBound(b) + 1
     If la < 0 Then la = 0
     If lb < 0 Then lb = 0
 
-    Set result = New Collection
+    Dim result As New Collection
 
     If la = 0 And lb = 0 Then
         Set LCSDiff = result
         Exit Function
     End If
     If la = 0 Then
+        Dim j As Long
         For j = 0 To lb - 1
             result.Add Array("ins", b(j))
         Next j
@@ -358,6 +276,7 @@ Function LCSDiff(a() As String, b() As String) As Collection
         Exit Function
     End If
     If lb = 0 Then
+        Dim i2 As Long
         For i2 = 0 To la - 1
             result.Add Array("del", a(i2))
         Next i2
@@ -365,7 +284,10 @@ Function LCSDiff(a() As String, b() As String) As Collection
         Exit Function
     End If
 
+    Dim dp() As Long
     ReDim dp(0 To la, 0 To lb)
+    Dim x As Long
+    Dim y As Long
     For x = 1 To la
         For y = 1 To lb
             If a(x - 1) = b(y - 1) Then
@@ -378,7 +300,7 @@ Function LCSDiff(a() As String, b() As String) As Collection
         Next y
     Next x
 
-    Set revOps = New Collection
+    Dim revOps As New Collection
     x = la
     y = lb
     Do While x > 0 And y > 0
@@ -403,6 +325,7 @@ Function LCSDiff(a() As String, b() As String) As Collection
         y = y - 1
     Loop
 
+    Dim n As Long
     For n = revOps.Count To 1 Step -1
         result.Add revOps(n)
     Next n
