@@ -129,6 +129,7 @@ Sub RunDiff()
                     If valA <> valB Then
                         anyChanged = True
                         WriteWordDiff wsD.Cells(outRow, colOut), valA, valB
+                        wsD.Cells(outRow, colOut).Interior.Color = RGB(255, 235, 156)
                     Else
                         wsD.Cells(outRow, colOut).Value = valA
                     End If
@@ -154,8 +155,14 @@ Sub RunDiff()
             Case "Modified"
                 fillColor = RGB(255, 235, 156)
         End Select
-        If fillColor <> -1 Then
+
+        If status = "Added" Or status = "Removed" Then
+            ' Whole record is new or gone - the full row is the change
             wsD.Range(wsD.Cells(outRow, 1), wsD.Cells(outRow, colOut - 1)).Interior.Color = fillColor
+        ElseIf status = "Modified" Then
+            ' Only tint the Status cell here - the actual changed fields
+            ' were already highlighted individually above, cell by cell
+            wsD.Cells(outRow, 1).Interior.Color = fillColor
         End If
 
         outRow = outRow + 1
