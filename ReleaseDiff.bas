@@ -129,25 +129,22 @@ Sub RunReleaseDiff()
         End If
     Next r
 
-    ' --- Copy every row as-is, then fill in Notes ---
+    ' --- Write annotated rows: every old-rev row (Unchanged/Modified/
+    '     Deleted, all carry a note), plus new-rev rows only when they
+    '     represent a brand-new rule (the "New" note has nowhere else
+    '     to go). Matched new-rev rows are skipped - their note already
+    '     lives on the corresponding old-rev row. ---
     Dim outRow As Long
     Dim noteTxt As String
     Dim nr As Long
+    Dim includeRow As Boolean
     outRow = 2
 
     For r = 2 To lastRow
-        wsOut.Cells(outRow, 1).Value = wsSrc.Cells(r, colRelease).Value
-        wsOut.Cells(outRow, 2).Value = wsSrc.Cells(r, colGroup).Value
-        wsOut.Cells(outRow, 3).Value = wsSrc.Cells(r, colSev).Value
-        wsOut.Cells(outRow, 4).Value = wsSrc.Cells(r, colStig).Value
-        wsOut.Cells(outRow, 5).Value = wsSrc.Cells(r, colTitle).Value
-        wsOut.Cells(outRow, 6).Value = wsSrc.Cells(r, colFix).Value
-        wsOut.Cells(outRow, 7).Value = wsSrc.Cells(r, colDisc).Value
-        wsOut.Cells(outRow, 8).Value = wsSrc.Cells(r, colCheck).Value
-
         relTxt = Trim(CStr(wsSrc.Cells(r, colRelease).Value))
         gTxt = Trim(CStr(wsSrc.Cells(r, colGroup).Value))
         noteTxt = ""
+        includeRow = True
 
         If relTxt = oldRelease And gTxt <> "" Then
             If Not RD_KeyExists(newRows, gTxt) Then
@@ -157,19 +154,29 @@ Sub RunReleaseDiff()
                 noteTxt = RD_ClassifyChange(wsSrc, r, nr, colSev, colStig, colTitle, colFix, colDisc, colCheck)
             End If
         ElseIf relTxt = newRelease And gTxt <> "" Then
-            If Not RD_KeyExists(oldRows, gTxt) Then
+            If RD_KeyExists(oldRows, gTxt) Then
+                includeRow = False
+            Else
                 noteTxt = "New - not present in " & oldRelease
             End If
         End If
 
-        wsOut.Cells(outRow, 9).Value = noteTxt
-        RD_ColorNote wsOut.Cells(outRow, 9), noteTxt
-
-        outRow = outRow + 1
+        If includeRow Then
+            wsOut.Cells(outRow, 1).Value = wsSrc.Cells(r, colRelease).Value
+            wsOut.Cells(outRow, 2).Value = wsSrc.Cells(r, colGroup).Value
+            wsOut.Cells(outRow, 3).Value = wsSrc.Cells(r, colSev).Value
+            wsOut.Cells(outRow, 4).Value = wsSrc.Cells(r, colStig).Value
+            wsOut.Cells(outRow, 5).Value = wsSrc.Cells(r, colTitle).Value
+            wsOut.Cells(outRow, 6).Value = wsSrc.Cells(r, colFix).Value
+            wsOut.Cells(outRow, 7).Value = wsSrc.Cells(r, colDisc).Value
+            wsOut.Cells(outRow, 8).Value = wsSrc.Cells(r, colCheck).Value
+            wsOut.Cells(outRow, 9).Value = noteTxt
+            RD_ColorNote wsOut.Cells(outRow, 9), noteTxt
+            outRow = outRow + 1
+        End If
     Next r
 
-    wsOut.Range("A1:I1").AutoFilter
-    wsOut.Columns("A:I").AutoFit
+    RD_FormatOutput wsOut, outRow - 1
 
 CleanExit:
     Application.Calculation = xlCalculationAutomatic
@@ -345,4 +352,51 @@ Sub RD_ColorNote(targetCell As Range, noteTxt As String)
     ElseIf InStr(1, noteTxt, "Modified - Editorial Only", vbTextCompare) = 1 Then
         targetCell.Interior.Color = RGB(221, 235, 247)
     End If
+End Sub
+
+Sub RD_FormatOutput(ws As Worksheet, lastDataRow As Long)
+    ' Header: bold, filled, centered
+    With ws.Range("A1:I1")
+        .Font.Bold = True
+        .Interior.Color = RGB(217, 225, 242)
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+    End With
+    ws.Rows(1).RowHeight = 20
+
+    ' Fixed column widths - coded/short columns stay narrow, prose
+    ' columns get a set width and wrap instead of stretching out
+    ws.Columns("A").ColumnWidth = 34   ' Release Info
+    ws.Columns("B").ColumnWidth = 11   ' Group ID
+    ws.Columns("C").ColumnWidth = 10   ' Severity
+    ws.Columns("D").ColumnWidth = 16   ' STIG ID
+    ws.Columns("E").ColumnWidth = 32   ' Rule Title
+    ws.Columns("F").ColumnWidth = 48   ' Fix Text
+    ws.Columns("G").ColumnWidth = 48   ' Discussion
+    ws.Columns("H").ColumnWidth = 48   ' Check Content
+    ws.Columns("I").ColumnWidth = 38   ' Notes
+
+    If lastDataRow >= 2 Then
+        With ws.Range("A2:I" & lastDataRow)
+            .WrapText = True
+            .VerticalAlignment = xlTop
+            .HorizontalAlignment = xlLeft
+        End With
+        ws.Range("B2:D" & lastDataRow).HorizontalAlignment = xlCenter
+        ws.Rows("2:" & lastDataRow).AutoFit
+    End If
+
+    ' Thin grid around the whole table
+    With ws.Range("A1:I" & lastDataRow).Borders
+        .LineStyle = xlContinuous
+        .Color = RGB(191, 191, 191)
+        .Weight = xlThin
+    End With
+
+    ws.Range("A1:I1").AutoFilter
+
+    ws.Activate
+    ws.Range("A2").Select
+    ActiveWindow.FreezePanes = True
+    ws.Range("A1").Select
 End Sub
