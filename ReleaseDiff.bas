@@ -83,10 +83,10 @@ Sub RunReleaseDiff()
         End If
         Set wbTarget = ActiveWorkbook
     Else
-        Set wbTarget = Workbooks.Add(xlWBATWorksheet)
+        Set wbTarget = Workbooks.Open(Filename:=CStr(csvPath), Local:=True)
         Set wsSrc = wbTarget.Worksheets(1)
         wsSrc.Name = SRC_SHEET_NAME
-        RD_ImportCSVAsText CStr(csvPath), wsSrc
+        RD_NeutralizeAutoTypes wsSrc
 
         Dim xlsxPath As String
         xlsxPath = RD_SwapExtension(CStr(csvPath), ".xlsx")
@@ -285,34 +285,51 @@ ErrHandler:
 End Sub
 
 ' ---------------------------------------------------------------------
-' CSV -> XLSX IMPORT (imports everything as TEXT - no auto-number /
-' auto-date reinterpretation of IDs, version strings, etc.)
+' CSV -> XLSX IMPORT
 ' ---------------------------------------------------------------------
-Sub RD_ImportCSVAsText(csvPath As String, wsTarget As Worksheet)
-    Dim qt As QueryTable
-    Set qt = wsTarget.QueryTables.Add(Connection:="TEXT;" & csvPath, Destination:=wsTarget.Range("A1"))
+' The CSV itself is opened with Workbooks.Open, i.e. Excel's own native
+' CSV parser - not a hand-configured Text Import (QueryTables), which
+' has a long-standing bug where embedded newlines inside quoted fields
+' (very common in STIG Discussion/Check Content text) get treated as
+' real row breaks, shredding a single rule's row across several rows
+' and throwing off everything below it (including which row is really
+' the header row). Workbooks.Open handles quoted embedded commas and
+' newlines correctly.
+'
+' The one thing Workbooks.Open can still do is auto-type a cell that
+' looks like a number or date (e.g. a bare version number) instead of
+' leaving it as text. RD_NeutralizeAutoTypes below fixes that up
+' afterward without touching anything that was already text.
+Sub RD_NeutralizeAutoTypes(ws As Worksheet)
+    Dim usedRng As Range
+    Set usedRng = ws.UsedRange
+    If usedRng.Cells.Count = 0 Then Exit Sub
 
-    Dim colTypes(1 To 200) As Integer
-    Dim k As Integer
-    For k = 1 To 200
-        colTypes(k) = xlTextFormat
-    Next k
+    Dim rowStart As Long, colStart As Long, lastR As Long, lastC As Long
+    rowStart = usedRng.Row
+    colStart = usedRng.Column
+    lastR = rowStart + usedRng.Rows.Count - 1
+    lastC = colStart + usedRng.Columns.Count - 1
 
-    With qt
-        .TextFileParseType = xlDelimited
-        .TextFileCommaDelimiter = True
-        .TextFileTabDelimiter = False
-        .TextFileSemicolonDelimiter = False
-        .TextFileSpaceDelimiter = False
-        .TextFileConsecutiveDelimiter = False
-        .TextFileTextQualifier = xlTextQualifierDoubleQuote
-        .TextFilePlatform = 65001 ' UTF-8; change to 1252 if your CSVs use Windows-1252 encoding
-        .TextFileColumnDataTypes = colTypes
-        .AdjustColumnWidth = False
-        .Refresh BackgroundQuery:=False
+    Dim dataArr As Variant
+    dataArr = ws.Range(ws.Cells(rowStart, colStart), ws.Cells(lastR, lastC)).Value2
+
+    Dim r As Long, c As Long, v As Variant, vt As VbVarType
+    For r = 1 To UBound(dataArr, 1)
+        For c = 1 To UBound(dataArr, 2)
+            v = dataArr(r, c)
+            vt = VarType(v)
+            If vt = vbDouble Or vt = vbSingle Or vt = vbInteger Or vt = vbLong Or vt = vbDate Or vt = vbCurrency Then
+                ' Was auto-typed as a number/date - grab the exact displayed text instead.
+                dataArr(r, c) = ws.Cells(rowStart + r - 1, colStart + c - 1).Text
+            End If
+        Next c
+    Next r
+
+    With ws.Range(ws.Cells(rowStart, colStart), ws.Cells(lastR, lastC))
+        .NumberFormat = "@"
+        .Value = dataArr
     End With
-
-    qt.Delete ' drop the live external-data link, keep only the imported static values
 End Sub
 
 Function RD_SwapExtension(path As String, newExt As String) As String
