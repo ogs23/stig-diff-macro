@@ -28,7 +28,12 @@ Option Explicit
 '      Deleted / Modified - Editorial Only / Modified - Need Review),
 '      naming exactly which column(s) changed.
 '   6. Formats the header row (bold, light blue fill, AutoFilter) and
-'      freezes panes below it.
+'      freezes the title/header rows plus every column through the
+'      rule-identifier column, so it stays visible while scrolling
+'      right through long prose columns.
+'   7. Writes a "Summary" sheet with the same counts as the completion
+'      popup (plus any duplicate-ID warnings) and a color legend,
+'      persisted in the file so it travels with it if you share it.
 '
 ' Expected input layout (this is standard for STIG CSV exports):
 '   Row 1            = a classification banner (e.g. "UNCLASSIFIED"),
@@ -60,6 +65,8 @@ Sub RunReleaseDiff()
     Dim completedOK As Boolean
     Dim oldRelease As String, newRelease As String
     Dim cntUnchanged As Long, cntEditorial As Long, cntReview As Long, cntNew As Long, cntDeleted As Long
+    Dim cntDupOld As Long, cntDupNew As Long
+    Dim sourceLabel As String
 
     completedOK = False
 
@@ -82,11 +89,13 @@ Sub RunReleaseDiff()
             GoTo CleanExit
         End If
         Set wbTarget = ActiveWorkbook
+        sourceLabel = "(existing workbook) " & wbTarget.Name
     Else
         Set wbTarget = Workbooks.Open(Filename:=CStr(csvPath), Local:=True)
         Set wsSrc = wbTarget.Worksheets(1)
         wsSrc.Name = SRC_SHEET_NAME
         RD_NeutralizeAutoTypes wsSrc
+        sourceLabel = CStr(csvPath)
 
         Dim xlsxPath As String
         xlsxPath = RD_SwapExtension(CStr(csvPath), ".xlsx")
@@ -114,12 +123,18 @@ Sub RunReleaseDiff()
     releaseCol = RD_FindReleaseColumn(wsSrc, headerRow, firstDataRow, lastCol)
     keyCol = RD_FindKeyColumn(wsSrc, headerRow, lastCol)
 
-    If releaseCol = 0 Then
-        MsgBox "Could not find a 'Release Info' style column (expected text like 'Release: 8 Benchmark Date: 01 Jan 2020' somewhere in a column). Add/rename that column and re-run.", vbCritical
-        GoTo CleanExit
-    End If
-    If keyCol = 0 Then
-        MsgBox "Could not find a unique rule-identifier column (looked for headers named Group ID / Vuln ID / Rule ID / STIG ID / Legacy ID). Rename your ID column to one of these and re-run.", vbCritical
+    If releaseCol = 0 Or keyCol = 0 Then
+        Dim diagMsg As String
+        diagMsg = "Header row detected: row " & headerRow & vbCrLf & _
+                  "Headers found there: " & RD_JoinRowValues(wsSrc, headerRow, lastCol) & vbCrLf & vbCrLf
+
+        If releaseCol = 0 Then
+            diagMsg = diagMsg & "Could not find a 'Release Info' style column (expected text like 'Release: 8 Benchmark Date: 01 Jan 2020' somewhere in a column). Add/rename that column and re-run."
+        Else
+            diagMsg = diagMsg & "Could not find a unique rule-identifier column (looked for headers named Group ID / Vuln ID / Rule ID / STIG ID / Legacy ID). Rename your ID column to one of these and re-run."
+        End If
+
+        MsgBox diagMsg, vbCritical
         GoTo CleanExit
     End If
 
@@ -191,9 +206,17 @@ Sub RunReleaseDiff()
         gTxt = Trim(RD_SafeStr(wsSrc.Cells(r, keyCol).Value))
         If gTxt <> "" Then
             If relTxt = oldRelease Then
-                If Not RD_KeyExists(oldRows, gTxt) Then oldRows.Add r, gTxt
+                If RD_KeyExists(oldRows, gTxt) Then
+                    cntDupOld = cntDupOld + 1
+                Else
+                    oldRows.Add r, gTxt
+                End If
             ElseIf relTxt = newRelease Then
-                If Not RD_KeyExists(newRows, gTxt) Then newRows.Add r, gTxt
+                If RD_KeyExists(newRows, gTxt) Then
+                    cntDupNew = cntDupNew + 1
+                Else
+                    newRows.Add r, gTxt
+                End If
             End If
         End If
     Next r
@@ -201,6 +224,11 @@ Sub RunReleaseDiff()
     ' ---- title banner + headers ----
     Dim outColCount As Long: outColCount = n + 1 ' + Notes
     Dim notesCol As Long: notesCol = outColCount
+
+    Dim keyOutCol As Long: keyOutCol = 1
+    For i = 0 To n - 1
+        If srcCols(i) = keyCol Then keyOutCol = i + 1: Exit For
+    Next i
 
     ' Force every output cell to Text format up front so nothing (IDs,
     ' version-like strings, dates embedded in prose) gets silently
@@ -257,7 +285,10 @@ Sub RunReleaseDiff()
     Next r
 
     Application.StatusBar = "Formatting output..."
-    RD_FormatOutput wsOut, outRow - 1, outColCount
+    RD_FormatOutput wsOut, outRow - 1, outColCount, keyOutCol
+
+    RD_WriteSummarySheet wbTarget, sourceLabel, oldRelease, newRelease, _
+        cntUnchanged, cntEditorial, cntReview, cntNew, cntDeleted, cntDupOld, cntDupNew
 
     wbTarget.Save
     completedOK = True
@@ -267,13 +298,21 @@ CleanExit:
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
     If completedOK Then
-        MsgBox "Release diff complete." & vbCrLf & _
+        Dim summaryMsg As String
+        summaryMsg = "Release diff complete." & vbCrLf & _
                "Older: " & oldRelease & vbCrLf & "Newer: " & newRelease & vbCrLf & vbCrLf & _
                "Unchanged: " & cntUnchanged & vbCrLf & _
                "Modified (editorial only): " & cntEditorial & vbCrLf & _
                "Modified (needs review): " & cntReview & vbCrLf & _
                "New rules: " & cntNew & vbCrLf & _
-               "Deleted rules: " & cntDeleted, vbInformation
+               "Deleted rules: " & cntDeleted
+        If cntDupOld > 0 Or cntDupNew > 0 Then
+            summaryMsg = summaryMsg & vbCrLf & vbCrLf & _
+                "Note: duplicate rule IDs were found (" & cntDupOld & " in the older release, " & _
+                cntDupNew & " in the newer) - only the first occurrence of each was used. See the Summary sheet."
+        End If
+        summaryMsg = summaryMsg & vbCrLf & vbCrLf & "Full breakdown saved on the Summary sheet."
+        MsgBox summaryMsg, vbInformation
     End If
     Exit Sub
 
@@ -357,17 +396,66 @@ Function RD_GetOrCreateSheet(wb As Workbook, sheetName As String) As Worksheet
     Set RD_GetOrCreateSheet = ws
 End Function
 
-' Finds the real header row by skipping any leading classification-banner
-' row (a row with only one populated cell, e.g. "UNCLASSIFIED").
+' Finds the real header row. Prefers a row that both (a) has several
+' populated cells (rules out a 1-cell classification banner) and (b)
+' actually looks like STIG column headers (rules out a banner or other
+' junk row that happens to have a few cells populated). Falls back to
+' the old "just count cells" heuristic if nothing scores as a header,
+' so unusual exports still get a best-effort guess instead of a hard
+' failure.
 Function RD_FindHeaderRow(ws As Worksheet) As Long
-    Dim r As Long
+    Dim keywords() As String
+    keywords = Split("group id,severity,release,rule id,stig id,benchmark,check content,fix text,discussion,vuln,rule title,cci,version,weight", ",")
+
+    Dim r As Long, fallbackRow As Long
+    fallbackRow = 0
+
     For r = 1 To HEADER_SCAN_LIMIT
         If Application.WorksheetFunction.CountA(ws.Rows(r)) >= 3 Then
-            RD_FindHeaderRow = r
-            Exit Function
+            If fallbackRow = 0 Then fallbackRow = r
+            If RD_ScoreHeaderRow(ws, r, keywords) >= 2 Then
+                RD_FindHeaderRow = r
+                Exit Function
+            End If
         End If
     Next r
-    RD_FindHeaderRow = 1 ' fallback: assume no banner row is present
+
+    If fallbackRow > 0 Then
+        RD_FindHeaderRow = fallbackRow
+    Else
+        RD_FindHeaderRow = 1 ' last resort: assume no banner row is present
+    End If
+End Function
+
+' Counts how many recognizable STIG header keywords appear among row r's
+' populated cells.
+Function RD_ScoreHeaderRow(ws As Worksheet, r As Long, keywords() As String) As Long
+    Dim lastC As Long, c As Long, cellTxt As String, score As Long, kw As Variant
+    lastC = ws.Cells(r, ws.Columns.Count).End(xlToLeft).Column
+    If lastC > 60 Then lastC = 60 ' cap the scan width, headers never run this wide
+
+    score = 0
+    For c = 1 To lastC
+        cellTxt = LCase(Trim(RD_SafeStr(ws.Cells(r, c).Value)))
+        If cellTxt <> "" Then
+            For Each kw In keywords
+                If InStr(cellTxt, CStr(kw)) > 0 Then
+                    score = score + 1
+                    Exit For
+                End If
+            Next kw
+        End If
+    Next c
+    RD_ScoreHeaderRow = score
+End Function
+
+' Joins a row's populated header values for diagnostic error messages.
+Function RD_JoinRowValues(ws As Worksheet, r As Long, lastCol As Long) As String
+    Dim c As Long, result As String
+    For c = 1 To lastCol
+        result = result & "[" & RD_SafeStr(ws.Cells(r, c).Value) & "] "
+    Next c
+    RD_JoinRowValues = Trim(result)
 End Function
 
 ' Finds the last real data row, trimming off a trailing classification-
@@ -782,7 +870,7 @@ End Sub
 ' ---------------------------------------------------------------------
 ' OUTPUT FORMATTING
 ' ---------------------------------------------------------------------
-Sub RD_FormatOutput(ws As Worksheet, lastDataRow As Long, outColCount As Long)
+Sub RD_FormatOutput(ws As Worksheet, lastDataRow As Long, outColCount As Long, keyOutCol As Long)
     Const headerRowNum As Long = 2
 
     Dim headerRange As Range
@@ -821,7 +909,127 @@ Sub RD_FormatOutput(ws As Worksheet, lastDataRow As Long, outColCount As Long)
     headerRange.AutoFilter
 
     ws.Activate
-    ws.Cells(headerRowNum + 1, 1).Select
+    ' Freeze the title/header rows AND every column up through the rule
+    ' identifier, so it stays in view while scrolling right through the
+    ' long prose columns (Fix Text, Discussion, etc.).
+    ws.Cells(headerRowNum + 1, keyOutCol + 1).Select
     ActiveWindow.FreezePanes = True
     ws.Cells(1, 1).Select
+End Sub
+
+' ---------------------------------------------------------------------
+' SUMMARY SHEET
+' ---------------------------------------------------------------------
+' Persists the run's counts and a color legend into the workbook itself
+' (rather than just a popup that disappears), since this file is meant
+' to be handed off/shared as a compliance artifact.
+Sub RD_WriteSummarySheet(wb As Workbook, sourceLabel As String, oldRelease As String, newRelease As String, _
+                          cntUnchanged As Long, cntEditorial As Long, cntReview As Long, cntNew As Long, cntDeleted As Long, _
+                          cntDupOld As Long, cntDupNew As Long)
+    Dim ws As Worksheet
+    Set ws = RD_GetOrCreateSheet(wb, "Summary")
+    ws.Cells.Clear
+
+    With ws.Range("A1:B1")
+        .Merge
+        .Value = "STIG Release Comparison - Summary"
+        .Font.Bold = True
+        .Font.Size = 14
+        .Font.Color = RGB(255, 255, 255)
+        .Interior.Color = RGB(31, 78, 121)
+        .HorizontalAlignment = xlCenter
+    End With
+    ws.Rows(1).RowHeight = 22
+
+    ws.Range("A3").Value = "Source:"
+    ws.Range("B3").Value = sourceLabel
+    ws.Range("A4").Value = "Older release:"
+    ws.Range("B4").Value = oldRelease
+    ws.Range("A5").Value = "Newer release:"
+    ws.Range("B5").Value = newRelease
+    ws.Range("A6").Value = "Generated:"
+    ws.Range("B6").Value = Format(Now, "yyyy-mm-dd hh:mm")
+    ws.Range("A3:A6").Font.Bold = True
+
+    Dim r As Long
+    r = 8
+    ws.Cells(r, 1).Value = "Change Summary"
+    ws.Cells(r, 1).Font.Bold = True
+    r = r + 1
+
+    With ws.Range(ws.Cells(r, 1), ws.Cells(r, 2))
+        .Font.Bold = True
+        .Interior.Color = RGB(173, 216, 230)
+    End With
+    ws.Cells(r, 1).Value = "Category"
+    ws.Cells(r, 2).Value = "Count"
+    r = r + 1
+
+    RD_WriteSummaryRow ws, r, "Unchanged", cntUnchanged: r = r + 1
+    RD_WriteSummaryRow ws, r, "Modified - Editorial Only", cntEditorial: r = r + 1
+    RD_WriteSummaryRow ws, r, "Modified - Need Review", cntReview: r = r + 1
+    RD_WriteSummaryRow ws, r, "New rules", cntNew: r = r + 1
+    RD_WriteSummaryRow ws, r, "Deleted rules", cntDeleted: r = r + 1
+    RD_WriteSummaryRow ws, r, "Total rules compared", cntUnchanged + cntEditorial + cntReview + cntNew + cntDeleted
+    ws.Range(ws.Cells(r, 1), ws.Cells(r, 2)).Font.Bold = True
+    r = r + 1
+
+    If cntDupOld > 0 Or cntDupNew > 0 Then
+        r = r + 1
+        RD_WriteSummaryRow ws, r, "Duplicate IDs skipped - older release (first occurrence kept)", cntDupOld: r = r + 1
+        RD_WriteSummaryRow ws, r, "Duplicate IDs skipped - newer release (first occurrence kept)", cntDupNew: r = r + 1
+    End If
+
+    r = r + 2
+    ws.Cells(r, 1).Value = "Color Legend"
+    ws.Cells(r, 1).Font.Bold = True
+    r = r + 1
+
+    With ws.Cells(r, 1)
+        .Value = "(cell fill)"
+        .Interior.Color = RGB(255, 242, 204)
+    End With
+    ws.Cells(r, 2).Value = "Cell changed between releases - the redlined wording is inside it"
+    r = r + 1
+
+    With ws.Cells(r, 1)
+        .Value = "Deleted wording"
+        .Font.Color = RGB(192, 0, 0)
+        .Font.Strikethrough = True
+    End With
+    ws.Cells(r, 2).Value = "Word removed going from the older to the newer release"
+    r = r + 1
+
+    With ws.Cells(r, 1)
+        .Value = "Inserted wording"
+        .Font.Color = RGB(0, 128, 0)
+        .Font.Underline = xlUnderlineStyleSingle
+    End With
+    ws.Cells(r, 2).Value = "Word added going from the older to the newer release"
+    r = r + 1
+
+    RD_WriteLegendRow ws, r, RGB(255, 199, 206), "Deleted rule (Notes cell)", "Rule exists only in the older release": r = r + 1
+    RD_WriteLegendRow ws, r, RGB(198, 239, 206), "New rule (Notes cell)", "Rule exists only in the newer release": r = r + 1
+    RD_WriteLegendRow ws, r, RGB(255, 235, 156), "Modified - Need Review (Notes cell)", "Substantive change - worth a human look": r = r + 1
+    RD_WriteLegendRow ws, r, RGB(221, 235, 247), "Modified - Editorial Only (Notes cell)", "Wording/formatting change only, no real meaning change": r = r + 1
+
+    ws.Columns("A").ColumnWidth = 42
+    ws.Columns("B").ColumnWidth = 50
+    ws.Range(ws.Cells(3, 1), ws.Cells(r, 2)).WrapText = True
+
+    ws.Activate
+    ws.Cells(1, 1).Select
+End Sub
+
+Sub RD_WriteSummaryRow(ws As Worksheet, r As Long, label As String, cnt As Long)
+    ws.Cells(r, 1).Value = label
+    ws.Cells(r, 2).Value = cnt
+End Sub
+
+Sub RD_WriteLegendRow(ws As Worksheet, r As Long, fillColor As Long, sampleText As String, meaning As String)
+    With ws.Cells(r, 1)
+        .Value = sampleText
+        .Interior.Color = fillColor
+    End With
+    ws.Cells(r, 2).Value = meaning
 End Sub
